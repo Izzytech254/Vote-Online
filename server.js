@@ -200,7 +200,7 @@ app.post("/api/orders", voteLimiter, async (req, res) => {
   }
 });
 
-app.post("/api/orders/:reference/verify", async (req, res) => {
+app.all("/api/orders/:reference/verify", async (req, res) => {
   const reference = String(req.params.reference || "");
   try {
     if (!getOrder(reference)) throw new HttpError(404, "Payment reference not found.");

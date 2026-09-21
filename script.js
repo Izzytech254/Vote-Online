@@ -181,7 +181,10 @@ async function handlePaymentCallback() {
   const reference = new URLSearchParams(window.location.search).get("payment");
   if (!reference) return;
   try {
-    const response = await fetch(`/api/orders/${encodeURIComponent(reference)}/verify`);
+    const response = await fetch(`/api/orders/${encodeURIComponent(reference)}/verify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" }
+    });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "Could not confirm your payment.");
     showPaymentOutcome(payload.order?.status === "paid", payload.order);
