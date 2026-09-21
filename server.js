@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import Database from "better-sqlite3";
+import { createClient } from "@libsql/client";
 import express from "express";
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -19,22 +19,26 @@ const PAYSTACK_CHANNELS = (process.env.PAYSTACK_CHANNELS || "card,mobile_money,b
   .filter(Boolean);
 const VOTE_PRICE_KSH = 10;
 const MAX_VOTES_PER_ORDER = positiveInteger(process.env.MAX_VOTES_PER_ORDER, 1000);
+const TURSO_URL = process.env.TURSO_URL || "";
+const TURSO_AUTH_TOKEN = process.env.TURSO_AUTH_TOKEN || "";
 const DB_PATH = path.resolve(process.env.DB_PATH || path.join(ROOT, "data", "school-vote.db"));
 
 mkdirSync(path.dirname(DB_PATH), { recursive: true });
-const db = new Database(DB_PATH);
-db.pragma("journal_mode = WAL");
-db.pragma("foreign_keys = ON");
-db.exec(`
-  CREATE TABLE IF NOT EXISTS candidates (
+const db = createClient(
+  TURSO_URL
+    ? { url: TURSO_URL, authToken: TURSO_AUTH_TOKEN }
+    : { url: `file:${DB_PATH}` }
+);
+
+const schemaStatements = [
+  `CREATE TABLE IF NOT EXISTS candidates (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
     role TEXT NOT NULL,
     image_path TEXT NOT NULL,
     position INTEGER NOT NULL UNIQUE
-  );
-
-  CREATE TABLE IF NOT EXISTS vote_orders (
+  );`,
+  `CREATE TABLE IF NOT EXISTS vote_orders (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     reference TEXT NOT NULL UNIQUE,
     candidate_id INTEGER NOT NULL REFERENCES candidates(id),
@@ -48,11 +52,10 @@ db.exec(`
     provider_response TEXT,
     created_at TEXT NOT NULL,
     paid_at TEXT
-  );
-
-  CREATE INDEX IF NOT EXISTS vote_orders_status_idx ON vote_orders(status);
-  CREATE INDEX IF NOT EXISTS vote_orders_candidate_idx ON vote_orders(candidate_id);
-`);
+  );`,
+  "CREATE INDEX IF NOT EXISTS vote_orders_status_idx ON vote_orders(status);",
+  "CREATE INDEX IF NOT EXISTS vote_orders_candidate_idx ON vote_orders(candidate_id);"
+];
 
 const candidateSeed = [
   { id: 1, name: "Mr Ismael Omwando", role: "School Administrator Candidate", image: "photos/Mr Ismael Omwando.jpeg", position: 1 },
@@ -62,15 +65,26 @@ const candidateSeed = [
   { id: 5, name: "Madam Ruth Kipng'eno", role: "School Administrator Candidate", image: "photos/Candidate 05 - stock photo.jpeg", position: 5 }
 ];
 
-if (db.prepare("SELECT COUNT(*) AS count FROM candidates").get().count === 0) {
-  const insertCandidate = db.prepare("INSERT INTO candidates (id, name, role, image_path, position) VALUES (?, ?, ?, ?, ?)");
-  const seed = db.transaction(() => {
-    for (const candidate of candidateSeed) {
-      insertCandidate.run(candidate.id, candidate.name, candidate.role, candidate.image, candidate.position);
+async function initDatabase() {
+  if (!TURSO_URL) {
+    try {
+      await db.execute("PRAGMA foreign_keys = ON");
+      await db.execute("PRAGMA journal_mode = WAL");
+    } catch (error) {
+      console.warn("Could not apply local DB settings:", error.message);
     }
-  });
-  seed();
+  }
+  await db.batch(schemaStatements);
+  const { rows } = await db.execute({ sql: "SELECT COUNT(*) AS count FROM candidates", args: [], column: "value" });
+  if (rows[0].count === 0) {
+    await db.batch(candidateSeed.map((candidate) => ({
+      sql: "INSERT INTO candidates (id, name, role, image_path, position) VALUES (?, ?, ?, ?, ?)",
+      args: [candidate.id, candidate.name, candidate.role, candidate.image, candidate.position]
+    })));
+  }
+  console.log(TURSO_URL ? "Database: Turso connected" : `Database: local file at ${DB_PATH}`);
 }
+await initDatabase();
 
 const app = express();
 app.set("trust proxy", 1);
@@ -132,22 +146,22 @@ setInterval(() => {
   for (const [key, value] of voteAttempts) if (value.resetAt < now) voteAttempts.delete(key);
 }, 10 * 60 * 1000).unref();
 
-app.get("/api/election", (req, res) => {
-  const voter = isVoter(req);
-  const candidates = getCandidates();
+app.get("/api/election", async (req, res) => {
+  const voter = await isVoter(req);
+  const candidates = await getCandidates();
   res.json({
     hasVoted: voter,
     votePriceKsh: VOTE_PRICE_KSH,
     maxVotesPerOrder: MAX_VOTES_PER_ORDER,
-    totalVotes: voter ? getTotalPaidVotes() : null,
+    totalVotes: voter ? await getTotalPaidVotes() : null,
     candidates: candidates.map((candidate) => voter ? candidate : { ...candidate, votes: null })
   });
 });
 
-app.get("/api/results", (req, res) => {
-  if (!isVoter(req)) throw new HttpError(403, "Vote to unlock live results.");
-  const results = getRankedCandidates();
-  const totalVotes = getTotalPaidVotes();
+app.get("/api/results", async (req, res) => {
+  if (!(await isVoter(req))) throw new HttpError(403, "Vote to unlock live results.");
+  const results = await getRankedCandidates();
+  const totalVotes = await getTotalPaidVotes();
   const percentages = percentageShares(results.map((candidate) => candidate.votes), totalVotes);
   res.json({
     totalVotes,
@@ -164,7 +178,7 @@ app.post("/api/orders", voteLimiter, async (req, res) => {
     const candidateId = Number(req.body?.candidateId);
     const quantity = Number(req.body?.quantity);
     const email = String(req.body?.email || "").trim().toLowerCase();
-    const candidate = db.prepare("SELECT id, name, role, image_path AS image FROM candidates WHERE id = ?").get(candidateId);
+    const candidate = await qGet("SELECT id, name, role, image_path AS image FROM candidates WHERE id = ?", [candidateId]);
 
     if (!candidate) throw new HttpError(404, "That candidate is no longer available.");
     if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > MAX_VOTES_PER_ORDER) {
@@ -176,23 +190,27 @@ app.post("/api/orders", voteLimiter, async (req, res) => {
     const amountSubunit = amountKsh * 100;
     const reference = createReference();
     const createdAt = new Date().toISOString();
-    db.prepare(`INSERT INTO vote_orders
-      (reference, candidate_id, quantity, amount_ksh, amount_subunit, email, status, provider, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)`)
-      .run(reference, candidateId, quantity, amountKsh, amountSubunit, email, PAYMENT_MODE, createdAt);
+    await qRun(
+      `INSERT INTO vote_orders
+        (reference, candidate_id, quantity, amount_ksh, amount_subunit, email, status, provider, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+      [reference, candidateId, quantity, amountKsh, amountSubunit, email, PAYMENT_MODE, createdAt]
+    );
 
     if (PAYMENT_MODE === "demo") {
-      db.prepare(`UPDATE vote_orders SET status = 'paid', provider_transaction_id = ?, paid_at = ? WHERE reference = ?`)
-        .run(`demo_${reference}`, new Date().toISOString(), reference);
+      await qRun(
+        `UPDATE vote_orders SET status = 'paid', provider_transaction_id = ?, paid_at = ? WHERE reference = ?`,
+        [`demo_${reference}`, new Date().toISOString(), reference]
+      );
       grantVoterAccess(res, reference);
-      return res.status(201).json({ order: getOrder(reference), checkoutUrl: null, mode: "demo" });
+      return res.status(201).json({ order: await getOrder(reference), checkoutUrl: null, mode: "demo" });
     }
 
     if (PAYMENT_MODE !== "paystack") throw new HttpError(500, "Invalid payment mode configuration.");
     assertPaystackConfigured();
     const checkoutUrl = await initializePaystackTransaction({ reference, candidate, quantity, amountKsh, amountSubunit, email });
-    db.prepare("UPDATE vote_orders SET status = 'awaiting_payment' WHERE reference = ?").run(reference);
-    return res.status(201).json({ order: getOrder(reference), checkoutUrl, mode: "paystack" });
+    await qRun("UPDATE vote_orders SET status = 'awaiting_payment' WHERE reference = ?", [reference]);
+    return res.status(201).json({ order: await getOrder(reference), checkoutUrl, mode: "paystack" });
   } catch (error) {
     if (error instanceof HttpError) return res.status(error.status).json({ error: error.message });
     console.error("Could not create vote order:", error.message);
@@ -203,9 +221,9 @@ app.post("/api/orders", voteLimiter, async (req, res) => {
 app.all("/api/orders/:reference/verify", async (req, res) => {
   const reference = String(req.params.reference || "");
   try {
-    if (!getOrder(reference)) throw new HttpError(404, "Payment reference not found.");
+    if (!(await getOrder(reference))) throw new HttpError(404, "Payment reference not found.");
     if (PAYMENT_MODE === "paystack") await verifyPaystackPayment(reference);
-    const order = getOrder(reference);
+    const order = await getOrder(reference);
     if (order?.status === "paid") grantVoterAccess(res, reference);
     return res.json({ order });
   } catch (error) {
@@ -220,7 +238,7 @@ app.get("/api/payments/paystack/callback", async (req, res) => {
   if (reference && PAYMENT_MODE === "paystack") {
     try {
       await verifyPaystackPayment(reference);
-      const order = getOrder(reference);
+      const order = await getOrder(reference);
       if (order?.status === "paid") grantVoterAccess(res, reference);
     } catch (error) {
       console.error("Paystack callback verification error:", error.message);
@@ -261,39 +279,54 @@ app.listen(PORT, () => {
   console.log(`Payment mode: ${PAYMENT_MODE}`);
 });
 
-function getCandidates() {
-  return db.prepare(`
+async function qGet(sql, args = []) {
+  const result = await db.execute({ sql, args, column: "value" });
+  return result.rows[0];
+}
+
+async function qAll(sql, args = []) {
+  const result = await db.execute({ sql, args, column: "value" });
+  return result.rows;
+}
+
+async function qRun(sql, args = []) {
+  await db.execute({ sql, args });
+}
+
+async function getCandidates() {
+  return qAll(`
     SELECT c.id, c.name, c.role, c.image_path AS image, c.position,
       COALESCE(SUM(CASE WHEN o.status = 'paid' THEN o.quantity ELSE 0 END), 0) AS votes
     FROM candidates c
     LEFT JOIN vote_orders o ON o.candidate_id = c.id
     GROUP BY c.id
     ORDER BY c.position ASC
-  `).all();
+  `);
 }
 
-function getRankedCandidates() {
-  return db.prepare(`
+async function getRankedCandidates() {
+  return qAll(`
     SELECT c.id, c.name, c.role, c.image_path AS image, c.position,
       COALESCE(SUM(CASE WHEN o.status = 'paid' THEN o.quantity ELSE 0 END), 0) AS votes
     FROM candidates c
     LEFT JOIN vote_orders o ON o.candidate_id = c.id
     GROUP BY c.id
     ORDER BY votes DESC, c.position ASC
-  `).all();
+  `);
 }
 
-function getTotalPaidVotes() {
-  return db.prepare("SELECT COALESCE(SUM(quantity), 0) AS total FROM vote_orders WHERE status = 'paid'").get().total;
+async function getTotalPaidVotes() {
+  const row = await qGet("SELECT COALESCE(SUM(quantity), 0) AS total FROM vote_orders WHERE status = 'paid'");
+  return row.total;
 }
 
 const VOTER_COOKIE = "voter_ref";
 const VOTER_COOKIE_MAX_AGE = 60 * 60 * 24 * 31;
 
-function isVoter(req) {
+async function isVoter(req) {
   const reference = parseCookies(req.headers.cookie || "")[VOTER_COOKIE];
   if (!reference) return false;
-  return !!db.prepare("SELECT 1 FROM vote_orders WHERE reference = ? AND status = 'paid'").get(reference);
+  return !!(await qGet("SELECT 1 FROM vote_orders WHERE reference = ? AND status = 'paid'", [reference]));
 }
 
 function grantVoterAccess(res, reference) {
@@ -325,14 +358,14 @@ function percentageShares(votes, total) {
   return shares;
 }
 
-function getOrder(reference) {
-  return db.prepare(`
+async function getOrder(reference) {
+  return qGet(`
     SELECT o.reference, o.quantity, o.amount_ksh AS amountKsh, o.status, o.provider, o.created_at AS createdAt,
       o.paid_at AS paidAt, c.id AS candidateId, c.name AS candidateName, c.role AS candidateRole, c.image_path AS candidateImage
     FROM vote_orders o
     JOIN candidates c ON c.id = o.candidate_id
     WHERE o.reference = ?
-  `).get(reference);
+  `, [reference]);
 }
 
 async function initializePaystackTransaction({ reference, candidate, quantity, amountKsh, amountSubunit, email }) {
@@ -381,7 +414,7 @@ function verifyPaystackPayment(reference) {
 }
 
 async function verifyPaystackPaymentUncached(reference) {
-  const order = db.prepare("SELECT * FROM vote_orders WHERE reference = ?").get(reference);
+  const order = await qGet("SELECT * FROM vote_orders WHERE reference = ?", [reference]);
   if (!order || order.status === "paid") return order;
   assertPaystackConfigured();
 
@@ -399,15 +432,19 @@ async function verifyPaystackPaymentUncached(reference) {
   const serialized = JSON.stringify({ status: transaction.status, reference: transaction.reference, amount: transaction.amount, currency: transaction.currency });
 
   if (verified) {
-    db.prepare(`UPDATE vote_orders
-      SET status = 'paid', provider_transaction_id = ?, provider_response = ?, paid_at = ?
-      WHERE reference = ? AND status != 'paid'`)
-      .run(String(transaction.id || ""), serialized, transaction.paid_at || new Date().toISOString(), reference);
+    await qRun(
+      `UPDATE vote_orders
+        SET status = 'paid', provider_transaction_id = ?, provider_response = ?, paid_at = ?
+        WHERE reference = ? AND status != 'paid'`,
+      [String(transaction.id || ""), serialized, transaction.paid_at || new Date().toISOString(), reference]
+    );
   } else if (["failed", "abandoned", "reversed"].includes(transaction.status)) {
-    markOrderFailed(reference, serialized);
+    await markOrderFailed(reference, serialized);
   } else if (transaction.status === "success") {
-    db.prepare("UPDATE vote_orders SET status = 'review', provider_response = ? WHERE reference = ? AND status != 'paid'")
-      .run(serialized, reference);
+    await qRun(
+      "UPDATE vote_orders SET status = 'review', provider_response = ? WHERE reference = ? AND status != 'paid'",
+      [serialized, reference]
+    );
   }
   return getOrder(reference);
 }
@@ -418,13 +455,15 @@ async function processPaystackEvent(event) {
   if (event.event === "charge.success") {
     await verifyPaystackPayment(reference);
   } else if (FAILED_PAYSTACK_EVENTS.has(event.event)) {
-    markOrderFailed(reference, JSON.stringify(event));
+    await markOrderFailed(reference, JSON.stringify(event));
   }
 }
 
-function markOrderFailed(reference, providerResponse) {
-  db.prepare("UPDATE vote_orders SET status = 'failed', provider_response = ? WHERE reference = ? AND status != 'paid'")
-    .run(providerResponse, reference);
+async function markOrderFailed(reference, providerResponse) {
+  await qRun(
+    "UPDATE vote_orders SET status = 'failed', provider_response = ? WHERE reference = ? AND status != 'paid'",
+    [providerResponse, reference]
+  );
 }
 
 function assertPaystackConfigured() {
