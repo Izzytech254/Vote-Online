@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#103b35" />
+    <title>School Leadership Vote</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="site-header container">
+        <a class="brand" href="#top" aria-label="School Leadership Vote home">
+          <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span>School<span>Vote</span></span>
+        </a>
+        <div class="header-actions">
+          <span class="secure-note"><span class="lock">⌑</span> Secure voting</span>
+          <button class="share-button" id="shareButton" type="button">
+            <span aria-hidden="true">↗</span> Share voting link
+          </button>
+        </div>
+      </header>
+
+      <main id="top">
+        <section class="hero container">
+          <div class="hero-copy">
+            <p class="eyebrow"><span></span> 2026 school leadership election</p>
+            <h1>Choose the leader<br />who will <em>move us forward.</em></h1>
+            <p class="intro">Support the teacher you trust to lead. Every vote is counted securely and helps shape the next chapter of our school.</p>
+            <div class="hero-details">
+              <div><span class="detail-icon">◎</span><p><b>Voting closes</b><br />Friday, 18 September · 6:00 PM</p></div>
+              <div><span class="detail-icon">KSh</span><p><b>One vote</b><br />KSh 10.00 only</p></div>
+            </div>
+            <a class="primary-link" href="#candidates">Meet the candidates <span>↓</span></a>
+          </div>
+          <div class="hero-visual kenya-hero" aria-label="A teacher supporting students in a classroom in Mwingi, Kenya">
+            <div class="visual-glow"></div>
+            <img src="photos/Kenyan classroom leadership.jpg" alt="A teacher supporting students in a classroom in Mwingi, Kenya" />
+            <a class="photo-credit" href="https://unsplash.com/photos/a-woman-standing-in-front-of-a-group-of-children-Xz5kTUYAu9A" target="_blank" rel="noreferrer">Photo: Oscar Omondi / Unsplash</a>
+            <div class="election-card">
+              <span class="vote-dot"></span>
+              <p>YOUR VOICE<br /><strong>MATTERS</strong></p>
+              <span class="year">’26</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="election-bar">
+          <div class="container election-bar-content">
+            <span class="status-pill"><i></i> Voting is open</span>
+            <p>5 teacher candidates · 1 school administrator position</p>
+            <button type="button" class="text-button" id="resultsButton">View live results <span>→</span></button>
+          </div>
+        </section>
+
+        <section class="candidates-section container" id="candidates">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow"><span></span> Your candidates</p>
+              <h2>Meet the educators<br />ready to lead.</h2>
+            </div>
+            <p class="section-note">Tap a candidate to learn more, then cast your vote securely.</p>
+          </div>
+          <div class="candidate-grid" id="candidateGrid" aria-live="polite"></div>
+        </section>
+
+        <section class="how-it-works">
+          <div class="container how-grid">
+            <div>
+              <p class="eyebrow light"><span></span> Simple & transparent</p>
+              <h2>Your vote, in three<br />simple steps.</h2>
+            </div>
+            <div class="steps">
+              <article><span>01</span><div><h3>Pick your candidate</h3><p>Read their profile and choose the educator you believe in.</p></div></article>
+              <article><span>02</span><div><h3>Pay KSh 10</h3><p>Use M-Pesa or card to securely complete your single vote.</p></div></article>
+              <article><span>03</span><div><h3>See the difference</h3><p>Your vote is recorded instantly and the rankings are updated.</p></div></article>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="site-footer container">
+        <a class="brand footer-brand" href="#top"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span>School<span>Vote</span></span></a>
+        <p>© 2026 School Leadership Election</p>
+        <button type="button" class="footer-link" id="footerResults">Results</button>
+      </footer>
+    </div>
+
+    <dialog class="modal" id="voteModal" aria-labelledby="voteModalTitle">
+      <button class="close-modal" type="button" data-close="voteModal" aria-label="Close">×</button>
+      <div id="voteContent"></div>
+    </dialog>
+
+    <dialog class="modal results-modal" id="resultsModal" aria-labelledby="resultsTitle">
+      <button class="close-modal" type="button" data-close="resultsModal" aria-label="Close results">×</button>
+      <div class="modal-heading">
+        <p class="eyebrow"><span></span> Live tally</p>
+        <h2 id="resultsTitle">Current standings</h2>
+        <p>Votes are shown as they are securely recorded.</p>
+      </div>
+      <div class="total-votes"><span>◎</span> <strong id="totalVoteCount">0</strong> verified votes</div>
+      <div class="ranking-list" id="rankingList"></div>
+      <p class="results-disclaimer">Results are provisional until voting closes and the election team verifies the final tally.</p>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script src="script.js"></script>
+  </body>
+</html>
