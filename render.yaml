@@ -1,0 +1,41 @@
+# Render Blueprint for SchoolVote
+# Docs: https://render.com/docs/blueprint-spec
+#
+# Note on data persistence:
+#   The app stores votes in a local SQLite file. On Render's free/standard
+#   web services the disk is wiped on every redeploy/restart. To keep votes
+#   across deploys you must attach the paid Persistent Disk (uncomment the
+#   `disk` block below); this sets DB_PATH to the mounted volume.
+#   Without it, votes are fine live but lost on the next deploy.
+
+services:
+  - type: web
+    name: school-vote
+    runtime: node
+    plan: free
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /api/election
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PAYMENT_MODE
+        value: paystack
+      - key: PUBLIC_BASE_URL
+        value: https://school-vote.onrender.com
+      - key: PAYSTACK_CURRENCY
+        value: KES
+      - key: PAYSTACK_CHANNELS
+        value: card,mobile_money,bank_transfer
+      # Set the secret in the Render dashboard (Environment), never in a file.
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+      # Set DB_PATH to /data/school-vote.db ONLY if the persistent disk is enabled.
+      # - key: DB_PATH
+      #   value: /data/school-vote.db
+
+# Optional paid Persistent Disk — uncomment to keep votes across deploys:
+# disk:
+#   name: sqlite-data
+#   mountPath: /data
+#   sizeGB: 1
