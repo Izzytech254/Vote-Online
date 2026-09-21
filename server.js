@@ -232,6 +232,8 @@ app.get("/api/payments/paystack/callback", async (req, res) => {
 
 app.get("/", (req, res) => res.sendFile(path.join(ROOT, "index.html")));
 app.get("/index.html", (req, res) => res.sendFile(path.join(ROOT, "index.html")));
+app.get("/results", (req, res) => res.sendFile(path.join(ROOT, "results.html")));
+app.get("/results.html", (req, res) => res.sendFile(path.join(ROOT, "results.html")));
 app.get("/styles.css", (req, res) => res.sendFile(path.join(ROOT, "styles.css")));
 app.get("/script.js", (req, res) => res.sendFile(path.join(ROOT, "script.js")));
 app.get("/leadership.svg", (req, res) => res.sendFile(path.join(ROOT, "leadership.svg")));

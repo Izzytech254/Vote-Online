@@ -145,17 +145,37 @@ async function openResults() {
     if (!response.ok) throw new Error(payload.error || "Could not load results.");
     document.querySelector("#totalVoteCount").textContent = payload.totalVotes.toLocaleString();
     document.querySelector("#rankingList").innerHTML = payload.results.map((candidate, index) => `
-      <div class="ranking-row">
+      <div class="ranking-row" data-navigate-results tabindex="0" role="button" aria-label="Open full analytics for ${candidate.name}">
         <span class="rank">0${index + 1}</span>
         <img src="${candidate.image}" alt="" />
         <div><div class="rank-name">${candidate.name}</div><div class="rank-progress"><i style="width:${candidate.percentage}%"></i></div></div>
         <div class="rank-number">${candidate.votes.toLocaleString()}<small>${candidate.percentage}%</small></div>
       </div>`).join("");
     resultsModal.showModal();
+    const footer = document.createElement("button");
+    footer.type = "button";
+    footer.className = "view-results analytics-cta";
+    footer.id = "openAnalytics";
+    footer.textContent = "Open full analytics page →";
+    footer.addEventListener("click", openAnalyticsPage);
+    const list = document.querySelector("#rankingList");
+    list.appendChild(footer);
   } catch (error) {
     showToast(error.message);
   }
 }
+
+function openAnalyticsPage() {
+  window.location.assign("/results");
+}
+
+resultsModal.addEventListener("click", (event) => {
+  if (event.target.closest("[data-navigate-results]")) openAnalyticsPage();
+});
+
+resultsModal.addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && event.target.closest("[data-navigate-results]")) openAnalyticsPage();
+});
 
 async function handlePaymentCallback() {
   const reference = new URLSearchParams(window.location.search).get("payment");
