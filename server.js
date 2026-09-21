@@ -133,16 +133,19 @@ setInterval(() => {
 }, 10 * 60 * 1000).unref();
 
 app.get("/api/election", (req, res) => {
+  const voter = isVoter(req);
   const candidates = getCandidates();
   res.json({
+    hasVoted: voter,
     votePriceKsh: VOTE_PRICE_KSH,
     maxVotesPerOrder: MAX_VOTES_PER_ORDER,
-    totalVotes: getTotalPaidVotes(),
-    candidates
+    totalVotes: voter ? getTotalPaidVotes() : null,
+    candidates: candidates.map((candidate) => voter ? candidate : { ...candidate, votes: null })
   });
 });
 
 app.get("/api/results", (req, res) => {
+  if (!isVoter(req)) throw new HttpError(403, "Vote to unlock live results.");
   const results = getRankedCandidates();
   const totalVotes = getTotalPaidVotes();
   const percentages = percentageShares(results.map((candidate) => candidate.votes), totalVotes);
@@ -181,6 +184,7 @@ app.post("/api/orders", voteLimiter, async (req, res) => {
     if (PAYMENT_MODE === "demo") {
       db.prepare(`UPDATE vote_orders SET status = 'paid', provider_transaction_id = ?, paid_at = ? WHERE reference = ?`)
         .run(`demo_${reference}`, new Date().toISOString(), reference);
+      grantVoterAccess(res, reference);
       return res.status(201).json({ order: getOrder(reference), checkoutUrl: null, mode: "demo" });
     }
 
@@ -201,7 +205,9 @@ app.post("/api/orders/:reference/verify", async (req, res) => {
   try {
     if (!getOrder(reference)) throw new HttpError(404, "Payment reference not found.");
     if (PAYMENT_MODE === "paystack") await verifyPaystackPayment(reference);
-    return res.json({ order: getOrder(reference) });
+    const order = getOrder(reference);
+    if (order?.status === "paid") grantVoterAccess(res, reference);
+    return res.json({ order });
   } catch (error) {
     if (error instanceof HttpError) return res.status(error.status).json({ error: error.message });
     console.error("Could not verify payment:", error.message);
@@ -214,6 +220,8 @@ app.get("/api/payments/paystack/callback", async (req, res) => {
   if (reference && PAYMENT_MODE === "paystack") {
     try {
       await verifyPaystackPayment(reference);
+      const order = getOrder(reference);
+      if (order?.status === "paid") grantVoterAccess(res, reference);
     } catch (error) {
       console.error("Paystack callback verification error:", error.message);
     }
@@ -241,6 +249,7 @@ app.use("/api", (req, res) => res.status(404).json({ error: "API route not found
 app.use((req, res) => res.status(404).send("Page not found."));
 app.use((error, req, res, next) => {
   if (error?.type === "entity.parse.failed") return res.status(400).json({ error: "Invalid JSON body." });
+  if (error instanceof HttpError) return res.status(error.status).json({ error: error.message });
   console.error("Unhandled server error:", error);
   return res.status(500).json({ error: "Server error." });
 });
@@ -274,6 +283,32 @@ function getRankedCandidates() {
 
 function getTotalPaidVotes() {
   return db.prepare("SELECT COALESCE(SUM(quantity), 0) AS total FROM vote_orders WHERE status = 'paid'").get().total;
+}
+
+const VOTER_COOKIE = "voter_ref";
+const VOTER_COOKIE_MAX_AGE = 60 * 60 * 24 * 31;
+
+function isVoter(req) {
+  const reference = parseCookies(req.headers.cookie || "")[VOTER_COOKIE];
+  if (!reference) return false;
+  return !!db.prepare("SELECT 1 FROM vote_orders WHERE reference = ? AND status = 'paid'").get(reference);
+}
+
+function grantVoterAccess(res, reference) {
+  const secure = NODE_ENV === "production" ? "; Secure" : "";
+  res.setHeader("Set-Cookie", `${VOTER_COOKIE}=${encodeURIComponent(reference)}; Path=/; Max-Age=${VOTER_COOKIE_MAX_AGE}; HttpOnly; SameSite=Lax${secure}`);
+}
+
+function parseCookies(header) {
+  const cookies = {};
+  for (const part of header.split(";")) {
+    const separator = part.indexOf("=");
+    if (separator === -1) continue;
+    const name = part.slice(0, separator).trim();
+    const value = part.slice(separator + 1).trim();
+    if (name) cookies[name] = decodeURIComponent(value);
+  }
+  return cookies;
 }
 
 function percentageShares(votes, total) {

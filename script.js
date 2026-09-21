@@ -1,18 +1,13 @@
-const candidates = [
-  { id: 1, name: "Mr Ismael Omwando", role: "School Administrator Candidate", votes: 0, image: "photos/Mr Ismael Omwando.jpeg" },
-  { id: 2, name: "Ogendo Felix", role: "School Administrator Candidate", votes: 0, image: "photos/Ogendo Felix.jpeg" },
-  { id: 3, name: "Onesmus Anyimu", role: "School Administrator Candidate", votes: 0, image: "photos/Onesmus Anyimu.jpeg" },
-  { id: 4, name: "Njeri Nyambura", role: "School Administrator Candidate", votes: 0, image: "photos/Candidate 04 - stock photo.jpeg" },
-  { id: 5, name: "Madam Ruth Kipng'eno", role: "School Administrator Candidate", votes: 0, image: "photos/Candidate 05 - stock photo.jpeg" }
-];
+let candidates = [];
+let hasVoted = false;
+let selectedCandidate = null;
+let voteQuantity = 1;
 
 const candidateGrid = document.querySelector("#candidateGrid");
 const voteModal = document.querySelector("#voteModal");
 const resultsModal = document.querySelector("#resultsModal");
 const voteContent = document.querySelector("#voteContent");
 const toast = document.querySelector("#toast");
-let selectedCandidate = null;
-let voteQuantity = 1;
 
 function renderCandidates() {
   candidateGrid.innerHTML = candidates.map((candidate, index) => `
@@ -38,7 +33,7 @@ function showVote(candidate) {
     <div class="modal-heading">
       <p class="eyebrow"><span></span> Cast your vote</p>
       <h2 id="voteModalTitle">You’re backing a leader.</h2>
-      <p>Choose how many votes you would like to cast. Each vote costs KSh 10.</p>
+      <p>Choose how many votes you would like to cast. Each vote costs KSh 10, paid securely.</p>
     </div>
     <div class="vote-choice">
       <img src="${candidate.image}" alt="${candidate.name}" />
@@ -52,19 +47,16 @@ function showVote(candidate) {
     </div>
     <p class="quantity-hint">You may choose as many votes as you wish.</p>
     <div class="price-line"><span id="voteSummary">1 verified vote</span><strong id="votePrice">KSh 10.00</strong></div>
-    <label class="pay-label">Choose payment method</label>
-    <div class="payment-methods">
-      <label class="payment-method"><input type="radio" name="payment" checked /> M-Pesa</label>
-      <label class="payment-method"><input type="radio" name="payment" /> Card</label>
-    </div>
-    <label class="pay-label" for="phoneNumber">M-Pesa phone number</label>
-    <input class="phone-input" id="phoneNumber" inputmode="tel" placeholder="e.g. 0712 345 678" aria-label="M-Pesa phone number" />
+    <label class="pay-label" for="voterEmail">Email for receipt (optional)</label>
+    <input class="phone-input" id="voterEmail" type="email" inputmode="email" autocomplete="email" placeholder="you@example.com" aria-label="Email address (optional)" />
     <button class="pay-button" id="payButton" type="button">Pay KSh 10 & cast 1 vote</button>
-    <p class="payment-note">You will receive a secure payment prompt on your phone.</p>`;
+    <p class="pay-page-error" id="payError" hidden></p>
+    <p class="payment-note">You’ll complete the payment with M-Pesa or card, and your vote is counted instantly once it succeeds.</p>`;
   voteModal.showModal();
   document.querySelector("#decreaseVotes").addEventListener("click", () => updateVoteQuantity(voteQuantity - 1));
   document.querySelector("#increaseVotes").addEventListener("click", () => updateVoteQuantity(voteQuantity + 1));
-  document.querySelector("#payButton").addEventListener("click", completeVote);
+  document.querySelector("#payButton").addEventListener("click", submitVote);
+  document.querySelector("#voterEmail").focus();
 }
 
 function updateVoteQuantity(quantity) {
@@ -77,57 +69,132 @@ function updateVoteQuantity(quantity) {
   document.querySelector("#decreaseVotes").disabled = voteQuantity === 1;
 }
 
-function completeVote() {
-  const phone = document.querySelector("#phoneNumber").value.trim();
-  if (phone && phone.replace(/\D/g, "").length < 9) {
-    showToast("Please enter a valid phone number.");
+async function submitVote() {
+  const emailInput = document.querySelector("#voterEmail");
+  const email = emailInput.value.trim();
+  const errorBox = document.querySelector("#payError");
+  const payButton = document.querySelector("#payButton");
+  errorBox.hidden = true;
+  if (email && !isValidEmail(email)) {
+    errorBox.textContent = "Please enter a valid email address or leave it blank.";
+    errorBox.hidden = false;
+    emailInput.focus();
     return;
   }
-  selectedCandidate.votes += voteQuantity;
-  const voteLabel = voteQuantity === 1 ? "vote" : "votes";
-  const voteVerb = voteQuantity === 1 ? "has" : "have";
-  const amount = (voteQuantity * 10).toLocaleString();
-  voteContent.innerHTML = `
+  payButton.disabled = true;
+  payButton.textContent = "Preparing payment…";
+  try {
+    const response = await fetch("/api/orders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        candidateId: selectedCandidate.id,
+        quantity: voteQuantity,
+        email: email || `voter-${Date.now().toString(36)}@example.com`
+      })
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Could not start your payment.");
+    if (payload.checkoutUrl) {
+      window.location.assign(payload.checkoutUrl);
+      return;
+    }
+    showPaymentOutcome(payload.order?.status === "paid", payload.order);
+  } catch (error) {
+    errorBox.textContent = error.message;
+    errorBox.hidden = false;
+    payButton.disabled = false;
+    payButton.textContent = `Pay KSh ${(voteQuantity * 10).toLocaleString()} & cast ${voteQuantity} ${voteQuantity === 1 ? "vote" : "votes"}`;
+  }
+}
+
+function showPaymentOutcome(paid, order) {
+  voteContent.innerHTML = paid ? `
     <div class="success-view">
       <div class="success-icon">✓</div>
       <p class="eyebrow" style="justify-content:center"><span></span> Vote recorded</p>
       <h2>Thank you for voting!</h2>
-      <p>Your ${voteQuantity} ${voteLabel} for <strong>${selectedCandidate.name}</strong> ${voteVerb} been recorded. KSh ${amount} has been added to your payment total.</p>
+      <p>Your ${order.quantity} ${order.quantity === 1 ? "vote" : "votes"} for <strong>${order.candidateName}</strong> ${order.quantity === 1 ? "has" : "have"} been confirmed and counted.</p>
       <button class="view-results" type="button" id="viewResultsAfterVote">See live results</button>
+    </div>` : `
+    <div class="success-view">
+      <div class="success-icon" style="color:#b3261e">✕</div>
+      <p class="eyebrow" style="justify-content:center"><span></span> Payment not confirmed</p>
+      <h2>Your vote was not counted.</h2>
+      <p>We could not confirm your payment. Please try again or contact the election team.</p>
+      <button class="view-results" type="button" id="closeAfterFailure">Close</button>
     </div>`;
-  document.querySelector("#viewResultsAfterVote").addEventListener("click", () => {
-    voteModal.close();
-    openResults();
-  });
+  if (paid) {
+    hasVoted = true;
+    loadElection();
+  }
+  const next = document.querySelector("#viewResultsAfterVote");
+  if (next) next.addEventListener("click", () => { voteModal.close(); openResults(); });
+  const close = document.querySelector("#closeAfterFailure");
+  if (close) close.addEventListener("click", () => voteModal.close());
 }
 
-function openResults() {
-  const sorted = [...candidates].sort((a, b) => b.votes - a.votes);
-  const total = totalVotes();
-  const percentages = percentageShares(sorted.map(candidate => candidate.votes), total);
-  document.querySelector("#totalVoteCount").textContent = total.toLocaleString();
-  document.querySelector("#rankingList").innerHTML = sorted.map((candidate, index) => {
-    const percentage = percentages[index];
-    return `<div class="ranking-row">
-      <span class="rank">0${index + 1}</span>
-      <img src="${candidate.image}" alt="" />
-      <div><div class="rank-name">${candidate.name}</div><div class="rank-progress"><i style="width:${percentage}%"></i></div></div>
-      <div class="rank-number">${candidate.votes.toLocaleString()}<small>${percentage}%</small></div>
-    </div>`;
-  }).join("");
-  resultsModal.showModal();
+async function openResults() {
+  if (!hasVoted) {
+    showToast("Vote to unlock live results.");
+    return;
+  }
+  try {
+    const response = await fetch("/api/results");
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Could not load results.");
+    document.querySelector("#totalVoteCount").textContent = payload.totalVotes.toLocaleString();
+    document.querySelector("#rankingList").innerHTML = payload.results.map((candidate, index) => `
+      <div class="ranking-row">
+        <span class="rank">0${index + 1}</span>
+        <img src="${candidate.image}" alt="" />
+        <div><div class="rank-name">${candidate.name}</div><div class="rank-progress"><i style="width:${candidate.percentage}%"></i></div></div>
+        <div class="rank-number">${candidate.votes.toLocaleString()}<small>${candidate.percentage}%</small></div>
+      </div>`).join("");
+    resultsModal.showModal();
+  } catch (error) {
+    showToast(error.message);
+  }
 }
 
-function percentageShares(votes, total) {
-  if (!total || votes.length === 0) return votes.map(() => 0);
-  const raw = votes.map(vote => (vote / total) * 100);
-  const shares = raw.map(value => Math.floor(value));
-  let remainder = 100 - shares.reduce((sum, value) => sum + value, 0);
-  const fractional = raw
-    .map((value, index) => ({ index, fraction: value - Math.floor(value) }))
-    .sort((a, b) => b.fraction - a.fraction);
-  for (let i = 0; i < remainder; i++) shares[fractional[i].index] += 1;
-  return shares;
+async function handlePaymentCallback() {
+  const reference = new URLSearchParams(window.location.search).get("payment");
+  if (!reference) return;
+  try {
+    const response = await fetch(`/api/orders/${encodeURIComponent(reference)}/verify`);
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Could not confirm your payment.");
+    showPaymentOutcome(payload.order?.status === "paid", payload.order);
+  } catch (error) {
+    showToast(error.message);
+  }
+}
+
+async function loadElection() {
+  try {
+    const response = await fetch("/api/election");
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Could not load the election.");
+    hasVoted = payload.hasVoted;
+    candidates = payload.candidates.map(candidate => ({
+      id: candidate.id,
+      name: candidate.name,
+      role: candidate.role,
+      image: candidate.image,
+      votes: candidate.votes ?? 0
+    }));
+    renderCandidates();
+    if (payload.totalVotes !== null && payload.totalVotes !== undefined) {
+      document.querySelector("#totalVoteCount").textContent = totalVotes().toLocaleString();
+    }
+  } catch (error) {
+    candidateGrid.innerHTML = `<p class="section-note">Could not load candidates. Please refresh the page.</p>`;
+    showToast(error.message);
+  }
+}
+
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) && email.length <= 254;
 }
 
 function showToast(message) {
@@ -158,4 +225,9 @@ document.querySelector("#shareButton").addEventListener("click", async () => {
 document.querySelectorAll("[data-close]").forEach(button => button.addEventListener("click", () => document.querySelector(`#${button.dataset.close}`).close()));
 [voteModal, resultsModal].forEach(modal => modal.addEventListener("click", event => { if (event.target === modal) modal.close(); }));
 
-renderCandidates();
+loadElection();
+handlePaymentCallback().finally(() => {
+  if (new URLSearchParams(window.location.search).get("payment")) {
+    history.replaceState(null, "", window.location.pathname);
+  }
+});

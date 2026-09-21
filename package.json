@@ -6,7 +6,8 @@
   "description": "A Paystack-powered school leadership voting application.",
   "scripts": {
     "start": "node --env-file-if-exists=.env server.js",
-    "dev": "node --env-file-if-exists=.env --watch server.js"
+    "dev": "node --env-file-if-exists=.env --watch server.js",
+    "reset": "node --env-file-if-exists=.env scripts/reset.js"
   },
   "engines": {
     "node": ">=20"
