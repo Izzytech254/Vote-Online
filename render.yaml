@@ -31,7 +31,7 @@ services:
         value: card,mobile_money,bank_transfer
       # Point this at your Turso database (replace with your own URL).
       - key: TURSO_URL
-        value: libsql://school-vote.turso.io
+        value: libsql://voters-online-izzytech254.aws-us-east-1.turso.io
       # Secret — set in the Render dashboard (Environment), never in a file.
       - key: TURSO_AUTH_TOKEN
         sync: false
