@@ -62,7 +62,8 @@ const candidateSeed = [
   { id: 2, name: "Ogendo Felix", role: "School Administrator Candidate", image: "photos/Ogendo Felix.jpeg", position: 2 },
   { id: 3, name: "Onesmus Anyimu", role: "School Administrator Candidate", image: "photos/Onesmus Anyimu.jpeg", position: 3 },
   { id: 4, name: "Njeri Nyambura", role: "School Administrator Candidate", image: "photos/Candidate 04 - stock photo.jpeg", position: 4 },
-  { id: 5, name: "Madam Ruth Kipng'eno", role: "School Administrator Candidate", image: "photos/Candidate 05 - stock photo.jpeg", position: 5 }
+  { id: 5, name: "Madam Ruth Kipng'eno", role: "School Administrator Candidate", image: "photos/Candidate 05 - stock photo.jpeg", position: 5 },
+  { id: 6, name: "Oyago Fredrick M", role: "School Administrator Candidate", image: "photos/fred.jpg", position: 6 }
 ];
 
 async function initDatabase() {
