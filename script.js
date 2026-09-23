@@ -9,6 +9,22 @@ const resultsModal = document.querySelector("#resultsModal");
 const voteContent = document.querySelector("#voteContent");
 const toast = document.querySelector("#toast");
 
+const ELECTION_DEADLINE = new Date("2026-09-25T12:00:00").getTime();
+
+function updateCountdown() {
+  const diff = Math.max(0, ELECTION_DEADLINE - Date.now());
+  const hours = Math.floor(diff / 3600000);
+  const minutes = Math.floor(diff % 3600000 / 60000);
+  const seconds = Math.floor(diff % 60000 / 1000);
+  const millis = Math.floor(diff % 1000);
+  document.querySelector("#cd-hours").textContent = String(hours).padStart(2, "0");
+  document.querySelector("#cd-minutes").textContent = String(minutes).padStart(2, "0");
+  document.querySelector("#cd-seconds").textContent = String(seconds).padStart(2, "0");
+  document.querySelector("#cd-millis").textContent = String(millis).padStart(3, "0");
+}
+setInterval(updateCountdown, 37);
+updateCountdown();
+
 function renderCandidates() {
   candidateGrid.innerHTML = candidates.map((candidate, index) => `
     <article class="candidate-card">
