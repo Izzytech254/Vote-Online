@@ -2,6 +2,8 @@ let candidates = [];
 let hasVoted = false;
 let selectedCandidate = null;
 let voteQuantity = 1;
+let electionClosed = false;
+let electionDeadline = new Date("2026-09-25T12:00:00+03:00").getTime();
 
 const candidateGrid = document.querySelector("#candidateGrid");
 const voteModal = document.querySelector("#voteModal");
@@ -9,19 +11,35 @@ const resultsModal = document.querySelector("#resultsModal");
 const voteContent = document.querySelector("#voteContent");
 const toast = document.querySelector("#toast");
 
-const ELECTION_DEADLINE = new Date("2026-09-25T12:00:00").getTime();
-
 function updateCountdown() {
-  const diff = Math.max(0, ELECTION_DEADLINE - Date.now());
+  const diff = Math.max(0, electionDeadline - Date.now());
   const hours = Math.floor(diff / 3600000);
   const minutes = Math.floor(diff % 3600000 / 60000);
   const seconds = Math.floor(diff % 60000 / 1000);
-  document.querySelector("#cd-hours").textContent = String(hours).padStart(2, "0");
-  document.querySelector("#cd-minutes").textContent = String(minutes).padStart(2, "0");
-  document.querySelector("#cd-seconds").textContent = String(seconds).padStart(2, "0");
+  document.querySelector("#cd-hours").textContent = diff ? String(hours).padStart(2, "0") : "--";
+  document.querySelector("#cd-minutes").textContent = diff ? String(minutes).padStart(2, "0") : "--";
+  document.querySelector("#cd-seconds").textContent = diff ? String(seconds).padStart(2, "0") : "--";
+  if (!diff) setElectionClosed(true);
 }
 setInterval(updateCountdown, 1000);
 updateCountdown();
+
+function setElectionClosed(closed) {
+  if (electionClosed === closed) return;
+  electionClosed = closed;
+  const pill = document.querySelector("#statusPill");
+  if (pill) {
+    pill.classList.toggle("closed", closed);
+    pill.innerHTML = `<i></i> ${closed ? "Polls are closed" : "Voting is open"}`;
+  }
+  const label = document.querySelector("#countdownLabel");
+  if (label) label.textContent = closed ? "Polls closed" : "Polls close in";
+  const note = document.querySelector("#votingNote");
+  if (note) note.textContent = closed
+    ? "Voting has closed. Final standings are available on the results page."
+    : "Tap a candidate to learn more, then cast your vote securely.";
+  document.querySelectorAll("[data-candidate-id]").forEach(button => { button.disabled = closed; });
+}
 
 function renderCandidates() {
   candidateGrid.innerHTML = candidates.map((candidate, index) => `
@@ -32,7 +50,7 @@ function renderCandidates() {
       </div>
       <h3>${candidate.name}</h3>
       <p>${candidate.role}</p>
-      <button type="button" class="vote-button" data-candidate-id="${candidate.id}"><span>✓</span> Vote for ${candidate.name.split(" ")[0]}</button>
+      <button type="button" class="vote-button" data-candidate-id="${candidate.id}" ${electionClosed ? "disabled" : ""}><span>✓</span> Vote for ${candidate.name.split(" ")[0]}</button>
     </article>`).join("");
 }
 
@@ -149,7 +167,7 @@ function showPaymentOutcome(paid, order) {
 }
 
 async function openResults() {
-  if (!hasVoted) {
+  if (!hasVoted && !electionClosed) {
     showToast("Vote to unlock live results.");
     return;
   }
@@ -213,6 +231,9 @@ async function loadElection() {
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || "Could not load the election.");
     hasVoted = payload.hasVoted;
+    if (payload.electionEndsAt) electionDeadline = new Date(payload.electionEndsAt).getTime();
+    setElectionClosed(payload.electionClosed === true);
+    updateCountdown();
     candidates = payload.candidates.map(candidate => ({
       id: candidate.id,
       name: candidate.name,
@@ -244,6 +265,10 @@ function showToast(message) {
 candidateGrid.addEventListener("click", (event) => {
   const button = event.target.closest("[data-candidate-id]");
   if (!button) return;
+  if (electionClosed) {
+    showToast("Polls have closed. Voting is no longer accepted.");
+    return;
+  }
   showVote(candidates.find(candidate => candidate.id === Number(button.dataset.candidateId)));
 });
 

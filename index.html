@@ -50,10 +50,10 @@
 
         <section class="election-bar">
           <div class="container election-bar-content">
-            <span class="status-pill"><i></i> Voting is open</span>
+            <span class="status-pill" id="statusPill"><i></i> Voting is open</span>
             <p>6 teacher candidates · 1 school administrator position</p>
             <div class="countdown" id="countdown" aria-label="Time left until polls close">
-              <span class="countdown-label">Polls close in</span>
+              <span class="countdown-label" id="countdownLabel">Polls close in</span>
               <span class="countdown-units">
                 <span class="countdown-cell"><b id="cd-hours">--</b><i>hrs</i></span>
                 <span class="countdown-cell"><b id="cd-minutes">--</b><i>min</i></span>
@@ -70,7 +70,7 @@
               <p class="eyebrow"><span></span> Your candidates</p>
               <h2>Meet the educators<br />ready to lead.</h2>
             </div>
-            <p class="section-note">Tap a candidate to learn more, then cast your vote securely.</p>
+            <p class="section-note" id="votingNote">Tap a candidate to learn more, then cast your vote securely.</p>
           </div>
           <div class="candidate-grid" id="candidateGrid" aria-live="polite"></div>
         </section>

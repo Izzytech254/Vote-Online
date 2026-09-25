@@ -18,6 +18,7 @@ const PAYSTACK_CHANNELS = (process.env.PAYSTACK_CHANNELS || "card,mobile_money,b
   .map((channel) => channel.trim())
   .filter(Boolean);
 const VOTE_PRICE_KSH = 10;
+const ELECTION_DEADLINE = pollDeadline();
 const MAX_VOTES_PER_ORDER = positiveInteger(process.env.MAX_VOTES_PER_ORDER, 1000);
 const TURSO_URL = process.env.TURSO_URL || "";
 const TURSO_AUTH_TOKEN = process.env.TURSO_AUTH_TOKEN || "";
@@ -154,13 +155,15 @@ app.get("/api/election", async (req, res) => {
     hasVoted: voter,
     votePriceKsh: VOTE_PRICE_KSH,
     maxVotesPerOrder: MAX_VOTES_PER_ORDER,
+    electionEndsAt: new Date(ELECTION_DEADLINE).toISOString(),
+    electionClosed: isElectionClosed(),
     totalVotes: voter ? await getTotalPaidVotes() : null,
     candidates: candidates.map((candidate) => voter ? candidate : { ...candidate, votes: null })
   });
 });
 
 app.get("/api/results", async (req, res) => {
-  if (!(await isVoter(req))) throw new HttpError(403, "Vote to unlock live results.");
+  if (!isElectionClosed() && !(await isVoter(req))) throw new HttpError(403, "Vote to unlock live results.");
   const results = await getRankedCandidates();
   const totalVotes = await getTotalPaidVotes();
   const percentages = percentageShares(results.map((candidate) => candidate.votes), totalVotes);
@@ -176,6 +179,7 @@ app.get("/api/results", async (req, res) => {
 
 app.post("/api/orders", voteLimiter, async (req, res) => {
   try {
+    if (isElectionClosed()) throw new HttpError(403, "Polls have closed. Voting is no longer accepted.");
     const candidateId = Number(req.body?.candidateId);
     const quantity = Number(req.body?.quantity);
     const email = String(req.body?.email || "").trim().toLowerCase();
@@ -433,12 +437,18 @@ async function verifyPaystackPaymentUncached(reference) {
   const serialized = JSON.stringify({ status: transaction.status, reference: transaction.reference, amount: transaction.amount, currency: transaction.currency });
 
   if (verified) {
-    await qRun(
-      `UPDATE vote_orders
-        SET status = 'paid', provider_transaction_id = ?, provider_response = ?, paid_at = ?
-        WHERE reference = ? AND status != 'paid'`,
-      [String(transaction.id || ""), serialized, transaction.paid_at || new Date().toISOString(), reference]
-    );
+    if (isElectionClosed()) {
+      console.warn(`Payment for ${reference} reached verification after polls closed; rejecting the vote.`);
+      const closedResponse = JSON.stringify({ status: "rejected", reason: "Polls closed before this payment was confirmed.", transaction: transaction.status, reference: transaction.reference });
+      await markOrderFailed(reference, closedResponse);
+    } else {
+      await qRun(
+        `UPDATE vote_orders
+          SET status = 'paid', provider_transaction_id = ?, provider_response = ?, paid_at = ?
+          WHERE reference = ? AND status != 'paid'`,
+        [String(transaction.id || ""), serialized, transaction.paid_at || new Date().toISOString(), reference]
+      );
+    }
   } else if (["failed", "abandoned", "reversed"].includes(transaction.status)) {
     await markOrderFailed(reference, serialized);
   } else if (transaction.status === "success") {
@@ -487,6 +497,16 @@ function safeEqual(actual, expected) {
 function positiveInteger(value, fallback) {
   const number = Number(value);
   return Number.isSafeInteger(number) && number > 0 ? number : fallback;
+}
+
+function pollDeadline() {
+  const parsed = Date.parse(process.env.ELECTION_DEADLINE || "");
+  if (!Number.isNaN(parsed)) return parsed;
+  return Date.parse("2026-09-25T12:00:00+03:00");
+}
+
+function isElectionClosed() {
+  return Date.now() >= ELECTION_DEADLINE;
 }
 
 function isEmail(email) {
